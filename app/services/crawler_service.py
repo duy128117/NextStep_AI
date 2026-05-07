@@ -26,7 +26,7 @@ from app.models.company import Company
 from app.models.job import Currency, Job, JobLevel, JobStatus
 from app.models.job_skill import JobSkill
 from app.models.skill import Skill
-from app.services.skill_normalization import is_non_skill_role_label
+from app.services.skill_normalization import expand_skill_labels, is_non_skill_role_label
 
 
 class JobCrawler:
@@ -1065,14 +1065,15 @@ class JobCrawler:
 
         clean_skills: list[str] = []
         for skill in merged_skills:
-            normalized = self._normalize_skill_name(skill)
-            if not normalized:
-                continue
-            if is_non_skill_role_label(normalized):
-                continue
-            if len(normalized) > 50:
-                continue
-            clean_skills.append(normalized)
+            for expanded_skill in expand_skill_labels(skill):
+                normalized = self._normalize_skill_name(expanded_skill)
+                if not normalized:
+                    continue
+                if is_non_skill_role_label(normalized):
+                    continue
+                if len(normalized) > 50:
+                    continue
+                clean_skills.append(normalized)
 
         return self._dedupe_preserve_order(clean_skills)
 
@@ -1456,24 +1457,27 @@ class JobCrawler:
                             continue
                         if is_non_skill_role_label(skill_name):
                             continue
-                        key = skill_name.lower()
-                        if key in seen_keys:
-                            continue
-                        seen_keys.add(key)
+                        for expanded_skill in expand_skill_labels(skill_name):
+                            if is_non_skill_role_label(expanded_skill):
+                                continue
+                            key = expanded_skill.lower()
+                            if key in seen_keys:
+                                continue
+                            seen_keys.add(key)
 
-                        raw_importance = detail.get("importance", 0.6)
-                        try:
-                            importance_value = float(raw_importance)
-                        except (TypeError, ValueError):
-                            importance_value = 0.6
+                            raw_importance = detail.get("importance", 0.6)
+                            try:
+                                importance_value = float(raw_importance)
+                            except (TypeError, ValueError):
+                                importance_value = 0.6
 
-                        normalized_details.append(
-                            {
-                                "skill": skill_name,
-                                "importance": to_importance_tier(importance_value),
-                                "evidence_snippet": detail.get("evidence_snippet"),
-                            }
-                        )
+                            normalized_details.append(
+                                {
+                                    "skill": expanded_skill,
+                                    "importance": to_importance_tier(importance_value),
+                                    "evidence_snippet": detail.get("evidence_snippet"),
+                                }
+                            )
 
                 if normalized_details:
                     unique_tiers = {float(item.get("importance", 2.0)) for item in normalized_details}
@@ -1509,11 +1513,14 @@ class JobCrawler:
                     for skill_name in skill_names:
                         if is_non_skill_role_label(skill_name):
                             continue
-                        key = skill_name.lower()
-                        if key in seen:
-                            continue
-                        seen.add(key)
-                        deduped.append(skill_name)
+                        for expanded_skill in expand_skill_labels(skill_name):
+                            if is_non_skill_role_label(expanded_skill):
+                                continue
+                            key = expanded_skill.lower()
+                            if key in seen:
+                                continue
+                            seen.add(key)
+                            deduped.append(expanded_skill)
                     normalized_details = [
                         {
                             "skill": skill_name,

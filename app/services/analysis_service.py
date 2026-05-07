@@ -13,7 +13,7 @@ from app.schemas.analyzer import (
     WeakSkillGap,
 )
 from app.services.job_matching_service import LEVEL_MAP
-from app.services.skill_normalization import canonicalize_skill_key, is_non_skill_role_label
+from app.services.skill_normalization import canonicalize_skill_key, expand_skill_labels, is_non_skill_role_label
 
 
 class AnalysisService:
@@ -46,11 +46,18 @@ class AnalysisService:
 
     @staticmethod
     def _build_job_skill_map(payload: GapAnalysisRequest) -> Dict[str, object]:
-        return {
-            AnalysisService.normalize_skill_name(skill.name): skill
-            for skill in payload.job_skills
-            if not is_non_skill_role_label(skill.name)
-        }
+        job_skill_map: Dict[str, object] = {}
+        for skill in payload.job_skills:
+            if is_non_skill_role_label(skill.name):
+                continue
+            for skill_name in expand_skill_labels(skill.name):
+                if is_non_skill_role_label(skill_name):
+                    continue
+                key = AnalysisService.normalize_skill_name(skill_name)
+                if key and key not in job_skill_map:
+                    copied = skill.model_copy(update={"name": skill_name})
+                    job_skill_map[key] = copied
+        return job_skill_map
 
     @staticmethod
     def generate_gap_analysis(payload: GapAnalysisRequest) -> GapAnalysisResponse:

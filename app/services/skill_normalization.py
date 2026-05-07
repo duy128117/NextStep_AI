@@ -108,6 +108,42 @@ _SKILL_ALIAS_GROUPS = {
     "vuejs": ["vue", "vue.js", "vue js", "vuejs"],
 }
 
+_UNSPLITTABLE_SKILL_KEYS = {
+    "agile scrum",
+    "ci cd",
+    "cpp",
+    "csharp",
+    "dotnet",
+    "rest api",
+    "ui ux",
+}
+
+_CANONICAL_DISPLAY_NAMES = {
+    "ci cd": "CI/CD",
+    "cpp": "C++",
+    "csharp": "C#",
+    "css": "CSS",
+    "dotnet": ".NET",
+    "fastapi": "FastAPI",
+    "gcp": "GCP",
+    "html": "HTML",
+    "javascript": "JavaScript",
+    "mongodb": "MongoDB",
+    "mysql": "MySQL",
+    "nestjs": "NestJS",
+    "nextjs": "Next.js",
+    "nodejs": "Node.js",
+    "postgresql": "PostgreSQL",
+    "react": "React",
+    "react native": "React Native",
+    "rest api": "REST API",
+    "sql": "SQL",
+    "sql server": "MS SQL",
+    "typescript": "TypeScript",
+    "ui ux": "UI/UX",
+    "vuejs": "Vue.js",
+}
+
 
 _CANONICAL_SKILL_ALIASES: dict[str, str] = {}
 for canonical_key, aliases in _SKILL_ALIAS_GROUPS.items():
@@ -149,6 +185,13 @@ def canonicalize_skill_key(value: str | None) -> str:
     return _CANONICAL_SKILL_ALIASES.get(key, key)
 
 
+def canonical_skill_display_name(value: str | None) -> str:
+    key = canonicalize_skill_key(value)
+    if not key:
+        return ""
+    return _CANONICAL_DISPLAY_NAMES.get(key, str(value or "").strip())
+
+
 def is_non_skill_role_label(value: str | None) -> bool:
     key = normalize_skill_key(value)
     if not key:
@@ -171,6 +214,39 @@ def get_skill_aliases(value: str | None) -> list[str]:
         seen.add(key)
         result.append(key)
     return result
+
+
+def expand_skill_labels(value: str | None) -> list[str]:
+    text = str(value or "").strip()
+    if not text:
+        return []
+
+    canonical_key = canonicalize_skill_key(text)
+    if canonical_key in _UNSPLITTABLE_SKILL_KEYS:
+        return [text]
+
+    if not re.search(r"\s*(/|&|\+|\band\b)\s*", text, flags=re.IGNORECASE):
+        return [text]
+
+    parts = [
+        part.strip()
+        for part in re.split(r"\s*(?:/|&|\+|\band\b)\s*", text, flags=re.IGNORECASE)
+        if part.strip()
+    ]
+
+    if len(parts) <= 1:
+        return [text]
+
+    expanded: list[str] = []
+    seen: set[str] = set()
+    for part in parts:
+        key = canonicalize_skill_key(part)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        expanded.append(canonical_skill_display_name(part) or part)
+
+    return expanded or [text]
 
 
 def tokenize_skill(value: str | None) -> set[str]:

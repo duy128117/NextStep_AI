@@ -5,7 +5,7 @@ from typing import Dict, List, Set
 import re
 
 from app.schemas.analyzer import JobMatchRequest, JobMatchResponse, ScoreBreakdown
-from app.services.skill_normalization import canonicalize_skill_key, is_non_skill_role_label
+from app.services.skill_normalization import canonicalize_skill_key, expand_skill_labels, is_non_skill_role_label
 
 
 LEVEL_MAP: Dict[str, int] = {
@@ -45,6 +45,14 @@ class JobMatchingService:
         return canonicalize_skill_key(value)
 
     @staticmethod
+    def _expanded_skill_names(value: str) -> list[str]:
+        return [
+            item
+            for item in expand_skill_labels(value)
+            if item and not is_non_skill_role_label(item)
+        ]
+
+    @staticmethod
     def _tokenize(value: str) -> Set[str]:
         return {token for token in re.split(r"[^a-zA-Z0-9+#]+", (value or "").lower()) if token}
 
@@ -78,25 +86,33 @@ class JobMatchingService:
         for required in payload.job_skills:
             if is_non_skill_role_label(required.name):
                 continue
-            skill_key = JobMatchingService._normalize_skill_name(required.name)
+            required_names = JobMatchingService._expanded_skill_names(required.name)
+            if not required_names:
+                continue
             weight = JobMatchingService._normalize_importance(required.importance)
 
-            match_value = 0.0
-            if skill_key in cv_skill_keys:
-                match_value = 1.0
-            else:
-                required_tokens = JobMatchingService._tokenize(skill_key)
-                for cv_key in cv_skill_keys:
-                    if not cv_key:
-                        continue
-                    cv_tokens = JobMatchingService._tokenize(cv_key)
-                    overlap = JobMatchingService._jaccard(required_tokens, cv_tokens)
-                    if overlap >= 0.3:
-                        match_value = 0.5
-                        break
-                    if skill_key in cv_key or cv_key in skill_key:
-                        match_value = 0.5
-                        break
+            component_matches: list[float] = []
+            for required_name in required_names:
+                skill_key = JobMatchingService._normalize_skill_name(required_name)
+                match_value = 0.0
+                if skill_key in cv_skill_keys:
+                    match_value = 1.0
+                else:
+                    required_tokens = JobMatchingService._tokenize(skill_key)
+                    for cv_key in cv_skill_keys:
+                        if not cv_key:
+                            continue
+                        cv_tokens = JobMatchingService._tokenize(cv_key)
+                        overlap = JobMatchingService._jaccard(required_tokens, cv_tokens)
+                        if overlap >= 0.3:
+                            match_value = 0.5
+                            break
+                        if skill_key in cv_key or cv_key in skill_key:
+                            match_value = 0.5
+                            break
+                component_matches.append(match_value)
+
+            match_value = sum(component_matches) / len(component_matches)
 
             weighted_sum += weight * match_value
             weight_total += weight
@@ -120,24 +136,25 @@ class JobMatchingService:
         for required in payload.job_skills:
             if is_non_skill_role_label(required.name):
                 continue
-            job_skill_count += 1
-            req_name = JobMatchingService._normalize_skill_name(required.name)
-            required_tokens = JobMatchingService._tokenize(req_name)
+            for required_name in JobMatchingService._expanded_skill_names(required.name):
+                job_skill_count += 1
+                req_name = JobMatchingService._normalize_skill_name(required_name)
+                required_tokens = JobMatchingService._tokenize(req_name)
 
-            best = 0.0
-            for cv_skill in cv_items:
-                cv_name = JobMatchingService._normalize_skill_name(cv_skill.name)
-                if cv_name == req_name:
-                    score = 1.0
-                else:
-                    overlap = JobMatchingService._jaccard(required_tokens, JobMatchingService._tokenize(cv_name))
-                    score = min(0.6, overlap)
+                best = 0.0
+                for cv_skill in cv_items:
+                    cv_name = JobMatchingService._normalize_skill_name(cv_skill.name)
+                    if cv_name == req_name:
+                        score = 1.0
+                    else:
+                        overlap = JobMatchingService._jaccard(required_tokens, JobMatchingService._tokenize(cv_name))
+                        score = min(0.6, overlap)
 
-                score *= cv_skill.proficiency
-                if score > best:
-                    best = score
+                    score *= cv_skill.proficiency
+                    if score > best:
+                        best = score
 
-            total += best
+                total += best
 
         if job_skill_count == 0:
             return 0.0
@@ -192,14 +209,15 @@ class JobMatchingService:
         for skill in payload.job_skills:
             if is_non_skill_role_label(skill.name):
                 continue
-            key = JobMatchingService._normalize_skill_name(skill.name)
-            if not key or key in seen:
-                continue
-            seen.add(key)
-            if key in cv_skill_keys:
-                matched.append(skill.name)
-            else:
-                missing.append(skill.name)
+            for skill_name in JobMatchingService._expanded_skill_names(skill.name):
+                key = JobMatchingService._normalize_skill_name(skill_name)
+                if not key or key in seen:
+                    continue
+                seen.add(key)
+                if key in cv_skill_keys:
+                    matched.append(skill_name)
+                else:
+                    missing.append(skill_name)
 
         matched.sort(key=str.lower)
         missing.sort(key=str.lower)
