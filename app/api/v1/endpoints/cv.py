@@ -109,13 +109,6 @@ def _ensure_analysis_table() -> None:
             SkillGap.__table__,
         ],
     )
-    with engine.begin() as connection:
-        connection.execute(
-            text(
-                "ALTER TABLE cv_analysis_results "
-                "ADD COLUMN IF NOT EXISTS ai_review_json JSON"
-            )
-        )
 
 
 def _build_skill_lookup(db: Session) -> tuple[dict[str, Skill], dict[str, Skill]]:
@@ -373,6 +366,8 @@ def _run_analysis(
     timeframe_weeks: int,
     max_skills_per_phase: int,
     cv_filename: str | None = None,
+    user_id: int | None = None,
+    cv_id: int | None = None,
 ) -> CvIngestResponse:
     try:
         extracted = CvIngestService.extract_profile(db, cv_text)
@@ -474,7 +469,6 @@ def _run_analysis(
         job_match_json=match_result.model_dump(mode="json"),
         gap_analysis_json=gap_result.model_dump(mode="json"),
         roadmap_json=roadmap_result.model_dump(mode="json"),
-        ai_review_json=ai_review,
     )
     db.add(analysis_result)
     db.commit()
@@ -508,6 +502,8 @@ def ingest_cv(payload: CvIngestRequest, db: Session = Depends(get_db)) -> CvInge
         timeframe_weeks=payload.timeframe_weeks,
         max_skills_per_phase=payload.max_skills_per_phase,
         cv_filename=None,
+        user_id=None,
+        cv_id=None,
     )
 
 
@@ -516,6 +512,8 @@ async def ingest_cv_file(
     cv_file: UploadFile = File(...),
     job_id: int | None = Form(default=None),
     job_url: str | None = Form(default=None),
+    user_id: int | None = Form(default=None),
+    cv_id: int | None = Form(default=None),
     timeframe_weeks: int = Form(default=0),
     max_skills_per_phase: int = Form(default=4),
     db: Session = Depends(get_db),
@@ -545,11 +543,16 @@ async def ingest_cv_file(
         timeframe_weeks=timeframe_weeks,
         max_skills_per_phase=max_skills_per_phase,
         cv_filename=cv_file.filename,
+        user_id=user_id,
+        cv_id=cv_id,
     )
 
 
 @router.get("/analysis-results", response_model=AnalysisHistoryResponse)
-def list_analysis_results(limit: int = 20, db: Session = Depends(get_db)) -> AnalysisHistoryResponse:
+def list_analysis_results(
+    limit: int = 20,
+    db: Session = Depends(get_db),
+) -> AnalysisHistoryResponse:
     _ensure_analysis_table()
     normalized_limit = max(1, min(limit, 100))
     rows = (
@@ -562,6 +565,7 @@ def list_analysis_results(limit: int = 20, db: Session = Depends(get_db)) -> Ana
     items = [
         AnalysisHistoryItem(
             analysis_id=row.analysis_id,
+            cv_id=None,
             job_id=row.job_job_id,
             job_title=row.job.title if row.job else "Unknown job",
             cv_filename=row.cv_filename,
@@ -575,9 +579,16 @@ def list_analysis_results(limit: int = 20, db: Session = Depends(get_db)) -> Ana
 
 
 @router.get("/analysis-results/{analysis_id}", response_model=CvIngestResponse)
-def get_analysis_result(analysis_id: int, db: Session = Depends(get_db)) -> CvIngestResponse:
+def get_analysis_result(
+    analysis_id: int,
+    db: Session = Depends(get_db),
+) -> CvIngestResponse:
     _ensure_analysis_table()
-    row = db.query(CvAnalysisResult).filter(CvAnalysisResult.analysis_id == analysis_id).first()
+    row = (
+        db.query(CvAnalysisResult)
+        .filter(CvAnalysisResult.analysis_id == analysis_id)
+        .first()
+    )
     if not row:
         raise HTTPException(status_code=404, detail="Analysis result not found")
 
@@ -591,5 +602,5 @@ def get_analysis_result(analysis_id: int, db: Session = Depends(get_db)) -> CvIn
         job_match=row.job_match_json,
         gap_analysis=row.gap_analysis_json,
         roadmap=row.roadmap_json,
-        ai_review=row.ai_review_json,
+        ai_review=None,
     )

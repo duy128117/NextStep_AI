@@ -1,4 +1,5 @@
 from app.models.company import Company
+from app.models.cv import CV
 from app.models.cv_analysis_result import CvAnalysisResult
 from app.models.cv_skill import CvSkill
 from app.models.job import Currency, Job, JobLevel, JobStatus
@@ -6,9 +7,11 @@ from app.models.job_skill import JobSkill
 from app.models.skill import Skill
 from app.models.skill_course import SkillCourse
 from app.models.skill_gap import SkillGap
+from app.models.user_data import User
 
 __all__ = [
 	"Company",
+	"CV",
 	"CvAnalysisResult",
 	"CvSkill",
 	"Currency",
@@ -19,4 +22,5 @@ __all__ = [
 	"Skill",
 	"SkillCourse",
 	"SkillGap",
+	"User",
 ]
